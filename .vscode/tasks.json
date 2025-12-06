@@ -1,0 +1,27 @@
+{
+  "version": "2.0.0",
+  "tasks": [
+    {
+      "label": "Run on Pico",
+      "type": "shell",
+      "command": "python3 -m mpremote run main.py",
+      "options": {
+        "cwd": "${workspaceFolder}"
+      },
+      "group": {
+        "kind": "build",
+        "isDefault": true
+      },
+      "problemMatcher": []
+    },
+    {
+      "label": "Upload to Pico",
+      "type": "shell",
+      "command": "python3 -m mpremote cp main.py :main.py && python3 -m mpremote cp led.py :led.py",
+      "options": {
+        "cwd": "${workspaceFolder}"
+      },
+      "problemMatcher": []
+    }
+  ]
+}
