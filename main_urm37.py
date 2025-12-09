@@ -25,7 +25,7 @@ def create_sensor(
     rx: int = 5,
     baudrate: int = 9600,
     timeout_ms: int = 200,
-    measurement_timeout_ms: int = 120,
+    measurement_timeout_ms: int = 80,
 ) -> URM37:
     """UART1 + URM37 のデフォルト構成でセンサインスタンスを生成する。"""
     uart = UARTPort(port=port, baudrate=baudrate, tx=tx, rx=rx, timeout_ms=timeout_ms)
