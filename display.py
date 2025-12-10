@@ -132,8 +132,15 @@ def build_ui(root: tk.Tk):
     header = ttk.Label(root, text="URM37 LIVE FEED", style="Caption.TLabel", font=title_font)
     header.pack(anchor="w", pady=(0, 10))
 
-    card = ttk.Frame(root, style="Card.TFrame", padding=(16, 14))
-    card.pack(fill="both", expand=True)
+    # 中央に左右2分割のコンテナを置く
+    content = ttk.Frame(root, style="Card.TFrame", padding=(12, 12))
+    content.pack(fill="both", expand=True)
+    content.columnconfigure(0, weight=1, uniform="col")
+    content.columnconfigure(1, weight=1, uniform="col")
+
+    # 左カラム: これまでのカード
+    card = ttk.Frame(content, style="Card.TFrame", padding=(16, 14))
+    card.grid(row=0, column=0, sticky="nsew", padx=(0, 12))
 
     dist_caption = ttk.Label(card, text="Distance", style="Caption.TLabel")
     dist_label = ttk.Label(card, text="-- cm", style="Value.TLabel")
@@ -145,17 +152,104 @@ def build_ui(root: tk.Tk):
     temp_caption.pack(anchor="w", pady=(4, 0))
     temp_label.pack(anchor="w", pady=(0, 4))
 
+    # 右カラム: 距離バー＆スケール用キャンバス
+    right = ttk.Frame(content, style="Card.TFrame", padding=(12, 12))
+    right.grid(row=0, column=1, sticky="nsew", padx=(12, 0))
+    canvas = tk.Canvas(right, width=200, height=400, bg=BG_MAIN, highlightthickness=0)
+    canvas.pack(fill="both", expand=True)
+
+    # スケール描画用のヘルパー（20cm刻みで 0〜200cm）
+    def draw_scale(event=None):
+        canvas.delete("scale")
+        max_dist = 200.0
+        height = canvas.winfo_height() or 400
+        width = canvas.winfo_width() or 200
+        top_margin = 20
+        bottom_margin = height - 20
+        scale_left = 40
+
+        # 縦軸
+        canvas.create_line(
+            scale_left,
+            top_margin,
+            scale_left,
+            bottom_margin,
+            fill=TEXT_MUTED,
+            width=1,
+            tags="scale",
+        )
+
+        # 20cm ごとの目盛り（横に長く、薄い線）
+        for dist in range(0, 201, 20):
+            ratio = dist / max_dist
+            # 0cm を下端、200cm を上端にする
+            y = bottom_margin - ratio * (bottom_margin - top_margin)
+            # 横方向のグリッド線
+            canvas.create_line(
+                scale_left,
+                y,
+                width - 20,
+                y,
+                fill=TEXT_MUTED,
+                width=1,
+                tags="scale",
+            )
+            # ラベル（cm）
+            canvas.create_text(
+                scale_left - 12,
+                y,
+                text=str(dist),
+                anchor="e",
+                fill=TEXT_MUTED,
+                tags="scale",
+            )
+
+        # 主目盛の間に 10cm ごとの副目盛を追加
+        for dist in range(10, 200, 10):
+            # 20cm 刻み（主目盛）は既に描画済みなのでスキップ
+            if dist % 20 == 0:
+                continue
+            ratio = dist / max_dist
+            # 0cm を下端、200cm を上端にする
+            y = bottom_margin - ratio * (bottom_margin - top_margin)
+            # 主目盛より短い横線（副目盛）を全長の点線に変更
+            canvas.create_line(
+                scale_left,
+                y,
+                width - 20,
+                y,
+                fill=TEXT_MUTED,
+                width=1,
+                dash=(4, 4),
+                tags="scale",
+            )
+
+    canvas.bind("<Configure>", draw_scale)
+    canvas.after_idle(draw_scale)
+
+    # 縦にスライドする小さめのバー
+    initial_height = 400
+    bar_width = 50
+    bar_height = 80
+    x0 = 200 / 2 - bar_width / 2
+    x1 = 200 / 2 + bar_width / 2
+    y0 = initial_height / 2 - bar_height / 2
+    y1 = y0 + bar_height
+    bar = canvas.create_rectangle(x0, y0, x1, y1, fill=ACCENT, width=0)
+
     status_label = ttk.Label(root, text="待機中...", style="Status.TLabel")
     raw_label = ttk.Label(root, text="", style="Raw.TLabel", wraplength=1000, justify="left")
 
     status_label.pack(anchor="w", pady=(12, 4))
-    raw_label.pack(anchor="w")
+    # raw_label は作るだけで表示しない（生データを出さない運用のため）
 
     return {
         "dist": dist_label,
         "temp": temp_label,
         "status": status_label,
         "raw": raw_label,
+        "canvas": canvas,
+        "bar": bar,
     }
 
 
@@ -183,7 +277,67 @@ def main():
     root = tk.Tk()
     widgets = build_ui(root)
 
-    state = {"dist": None, "temp": None}
+    state = {"dist": None, "temp": None, "dist_anim": 0.0}
+
+    def update_bar():
+        canvas = widgets["canvas"]
+        bar = widgets["bar"]
+        # 最大 2m をバーのフルスケールとする
+        max_dist = 200.0  # cm
+
+        if state["dist"] is None:
+            target = 0.0
+        else:
+            target = max(0.0, min(float(state["dist"]), max_dist))
+
+        cur = state["dist_anim"]
+        # なめらかに追従させる（イージング）
+        new = cur + (target - cur) * 0.2
+        state["dist_anim"] = new
+
+        # 0.0〜1.0 にクランプ（0cm = 下端, 200cm = 上端）
+        ratio = new / max_dist if max_dist > 0 else 0.0
+        if ratio < 0.0:
+            ratio = 0.0
+        elif ratio > 1.0:
+            ratio = 1.0
+
+        height = canvas.winfo_height() or 400
+        width = canvas.winfo_width() or 200
+
+        # draw_scale と同じマージン・スケール位置を使う
+        top_margin = 20
+        bottom_margin = height - 20
+        scale_left = 40
+
+        bar_height = 5
+        x0 = scale_left + 12          # 目盛りの少し右から
+        x1 = width - 20               # 右端手前までの長いバー
+
+        # 距離に応じてバーの上下位置を決定（下: 0cm, 上: 200cm）
+        # draw_scale と同じく、0cm を bottom_margin、200cm を top_margin にマッピング
+        y_center = bottom_margin - ratio * (bottom_margin - top_margin)
+        y0 = y_center - bar_height / 2
+        y1 = y_center + bar_height / 2
+
+        canvas.coords(bar, x0, y0, x1, y1)
+
+        # 距離に応じて色を変化（白≤10, 赤≤20, 黄≤30, 緑≤50, それ以遠は青）
+        color_bands = [
+            (10, "#ffffff"),
+            (20, "#ff0000"),
+            (30, "#ffd400"),
+            (50, "#00ff00"),
+        ]
+        color = "#0000ff"
+        if state["dist"] is not None:
+            for threshold, c in color_bands:
+                if state["dist"] <= threshold:
+                    color = c
+                    break
+        canvas.itemconfig(bar, fill=color)
+
+        root.after(30, update_bar)
 
     def update_ui():
         while True:
@@ -217,6 +371,8 @@ def main():
 
     root.protocol("WM_DELETE_WINDOW", on_close)
     update_ui()
+    # after_idle で初回を呼び出し、Canvasのサイズ確定後にアニメ開始
+    root.after_idle(update_bar)
     root.mainloop()
 
 
