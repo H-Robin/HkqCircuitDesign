@@ -164,9 +164,47 @@ def build_ui(root: tk.Tk):
         max_dist = 200.0
         height = canvas.winfo_height() or 400
         width = canvas.winfo_width() or 200
-        top_margin = 20
-        bottom_margin = height - 20
-        scale_left = 40
+
+        # モニター風フレームの定義（SF風の横長オペレーションモニターっぽく）
+        inset = 10
+        frame_left = inset
+        frame_top = inset
+        frame_right = width - inset
+        frame_bottom = height - inset
+
+        # 外枠（ネオンブルーのベゼル）
+        canvas.create_rectangle(
+            frame_left,
+            frame_top,
+            frame_right,
+            frame_bottom,
+            outline=ACCENT_SOFT,
+            width=3,
+            tags="scale",
+        )
+        # 上下左右に小さなパネル風の切り欠きを追加
+        notch = 12
+        canvas.create_line(frame_left, frame_top + notch, frame_left + notch, frame_top, fill=ACCENT_SOFT, width=3, tags="scale")
+        canvas.create_line(frame_right - notch, frame_top, frame_right, frame_top + notch, fill=ACCENT_SOFT, width=3, tags="scale")
+        canvas.create_line(frame_left, frame_bottom - notch, frame_left + notch, frame_bottom, fill=ACCENT_SOFT, width=3, tags="scale")
+        canvas.create_line(frame_right - notch, frame_bottom, frame_right, frame_bottom - notch, fill=ACCENT_SOFT, width=3, tags="scale")
+
+        # 内側スクリーン（暗めのパネル）
+        canvas.create_rectangle(
+            frame_left + 6,
+            frame_top + 6,
+            frame_right - 6,
+            frame_bottom - 6,
+            outline="#263454",
+            fill=CARD_BG,
+            width=2,
+            tags="scale",
+        )
+
+        # スケール用のマージン（フレーム内側に収める）
+        top_margin = frame_top + 20
+        bottom_margin = frame_bottom - 20
+        scale_left = frame_left + 56
 
         # 縦軸
         canvas.create_line(
@@ -188,7 +226,7 @@ def build_ui(root: tk.Tk):
             canvas.create_line(
                 scale_left,
                 y,
-                width - 20,
+                frame_right - 16,
                 y,
                 fill=TEXT_MUTED,
                 width=1,
@@ -216,7 +254,7 @@ def build_ui(root: tk.Tk):
             canvas.create_line(
                 scale_left,
                 y,
-                width - 20,
+                frame_right - 16,
                 y,
                 fill=TEXT_MUTED,
                 width=1,
@@ -237,17 +275,9 @@ def build_ui(root: tk.Tk):
     y1 = y0 + bar_height
     bar = canvas.create_rectangle(x0, y0, x1, y1, fill=ACCENT, width=0)
 
-    status_label = ttk.Label(root, text="待機中...", style="Status.TLabel")
-    raw_label = ttk.Label(root, text="", style="Raw.TLabel", wraplength=1000, justify="left")
-
-    status_label.pack(anchor="w", pady=(12, 4))
-    # raw_label は作るだけで表示しない（生データを出さない運用のため）
-
     return {
         "dist": dist_label,
         "temp": temp_label,
-        "status": status_label,
-        "raw": raw_label,
         "canvas": canvas,
         "bar": bar,
     }
@@ -305,14 +335,20 @@ def main():
         height = canvas.winfo_height() or 400
         width = canvas.winfo_width() or 200
 
-        # draw_scale と同じマージン・スケール位置を使う
-        top_margin = 20
-        bottom_margin = height - 20
-        scale_left = 40
+        # draw_scale と同じ「モニター枠」＋スケール位置を使う
+        inset = 12
+        frame_left = inset
+        frame_top = inset
+        frame_right = width - inset
+        frame_bottom = height - inset
+
+        top_margin = frame_top + 16
+        bottom_margin = frame_bottom - 16
+        scale_left = frame_left + 56
 
         bar_height = 5
-        x0 = scale_left + 12          # 目盛りの少し右から
-        x1 = width - 20               # 右端手前までの長いバー
+        x0 = scale_left + 8                 # 目盛りの少し右から
+        x1 = frame_right - 16               # 内側スクリーンの右端手前までの長いバー
 
         # 距離に応じてバーの上下位置を決定（下: 0cm, 上: 200cm）
         # draw_scale と同じく、0cm を bottom_margin、200cm を top_margin にマッピング
@@ -322,20 +358,24 @@ def main():
 
         canvas.coords(bar, x0, y0, x1, y1)
 
-        # 距離に応じて色を変化（白≤10, 赤≤20, 黄≤30, 緑≤50, それ以遠は青）
+        # 距離に応じて色を変化（LEDと同じしきい値に合わせる）
+        # 白≤10, 赤≤60, 黄≤100, 緑≤150, それ以遠は青
         color_bands = [
             (10, "#ffffff"),
-            (20, "#ff0000"),
-            (30, "#ffd400"),
-            (50, "#00ff00"),
+            (60, "#ff0000"),
+            (100, "#ffd400"),
+            (150, "#00ff00"),
         ]
-        color = "#0000ff"
+        color = "#0000ff"  # デフォルト（遠い場合）
         if state["dist"] is not None:
             for threshold, c in color_bands:
                 if state["dist"] <= threshold:
                     color = c
                     break
         canvas.itemconfig(bar, fill=color)
+
+        # スケールやフレームより前面にバーを表示
+        canvas.tag_raise(bar)
 
         root.after(30, update_bar)
 
@@ -356,11 +396,7 @@ def main():
                     if temp is not None:
                         state["temp"] = temp
                         widgets["temp"].config(text=f"{temp} C")
-                widgets["raw"].config(text=payload)
-            elif kind == "status":
-                widgets["status"].config(text=payload, foreground=ACCENT_SOFT)
-            elif kind == "error":
-                widgets["status"].config(text=payload, foreground=ERROR)
+            # status / error 表示は行わない
 
         root.after(int(args.interval * 1000), update_ui)
 
